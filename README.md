@@ -13,6 +13,11 @@ Steps:
    * python launch -r list\_of\_runs
  * merge the output
    * python merge.py
+ * treatment of BX lumi
+   * run brical
+     * time brilcalc lumi -r 321305 --xing -o lumi_run321305.csv
+     * remove the first line of the csv file
+     * readLumiPerBx.py run_number # it produces a file: lumi_bx.root 
  * produce the final plots
    * python StoN\_finalPlots.py
 
