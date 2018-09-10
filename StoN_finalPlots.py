@@ -1,5 +1,5 @@
 import ROOT
-from ROOT import TFile, TCanvas, TLatex, TLegend, TH1F, TH2F, TF1
+from ROOT import TFile, TCanvas, TLatex, TLegend, TH1F, TH2F, TF1, TGraph
 #ROOT.gROOT.Reset()
 ROOT.gROOT.SetBatch()
 #ROOT.gROOT.ProcessLine(".x setTDRStyle.C")
@@ -98,7 +98,7 @@ for i in range(nplots):
 		p.Draw()
 	else:
 		cSup.cd()
-		p.Scale(1./p.Integral())
+		if p.Integral()>0: p.Scale(1./p.Integral())
 		p.Draw("same")
 	
 legShape.Draw("same")
@@ -129,9 +129,263 @@ cSupBX.Print(ofilenamebase+"cSupShapeBX.png")
 
 cProfBX = TCanvas("cProfBX")
 profBX = plotBX_all_layers.ProfileX()
+profBX.GetYaxis().SetRangeUser(380,390)
+profBX.GetXaxis().SetTitle("bx")
+profBX.GetYaxis().SetTitle("mean charge/path")
 profBX.Draw()
 cProfBX.Write()
 cProfBX.Draw(ofilenamebase+"cProfBX.png")
+
+
+## plots of dep. vs bx rescale by bx lumi
+#read the bx lumi results from the root file and create a dictionnary
+meanPU = plot2DBX["TIB_L1"].ProjectionX().GetMean()
+bxlumiFile = TFile("lumi_vs_bx.root","READ")
+gbxlumi = bxlumiFile.Get("lumi_vs_bx")
+bxlumi = {}
+for i in range(gbxlumi.GetN()):
+  x = ROOT.Double(0)
+  y = ROOT.Double(0)
+  gbxlumi.GetPoint(i,x,y)
+  bxlumi[int(x)] = y
+bxlumiFile.Close()
+ofile.cd()
+sum1 = sum([1 for i in bxlumi.values() if i > 0]) 
+sum2 = sum(bxlumi.values())
+kfactorBX = sum1/sum2
+#print "#########", sum(bxlumi.values())/len(bxlumi)
+
+#analyze the trains
+trainStructure = []
+#trainStructure = {}
+ltmp = []
+#ltmp = {}
+first = True
+for indice, val  in enumerate (bxlumi.values()):
+  if val > 0:
+    #ltmp[indice] = val
+    ltmp.append((indice,val))
+    first = True
+  else:
+    if first:
+      trainStructure.append(ltmp)
+      ltmp = []
+      first = False
+
+#print trainStructure
+#print len(trainStructure)
+#print [len(i)for i in trainStructure]
+
+
+#select trains of > 40 bunches
+# build 4 lists:
+train_10 = []
+train_20 = []
+train_30 = []
+train_40 = []
+
+# build 5 lists of first bx in train:
+train_1 = []
+train_2 = []
+train_3 = []
+train_4 = []
+train_5 = []
+
+for train in trainStructure:
+  #sum bxlumi in train
+  avlumi = 0
+  if len(train)>0: avlumi = sum([i[1] for i in train])/len(train)
+  #print avlumi
+  if len(train)>=40 and avlumi>0.2:
+    for i, val in enumerate(train):
+      if i>=0 and i<10 : train_10.append(val)
+      if i>=10 and i<20 : train_20.append(val)
+      if i>=20 and i<30 : train_30.append(val)
+      if i>=30 and i<40 : train_40.append(val)
+
+  for i, val in enumerate(train):
+    if i == 1: train_1.append(val)
+    if i == 2: train_2.append(val)
+    if i == 3: train_3.append(val)
+    if i == 4: train_4.append(val)
+    if i == 5: train_5.append(val)
+
+#print train_10
+
+#sys.exit(-1)
+
+
+cProfBXNorm = TCanvas("cProfBXNorm")
+#profBXnorm = profBX.Clone("profBXnorm")
+profBXnorm = TH1F("profBXnorm","",profBX.GetNbinsX(),profBX.GetXaxis().GetXmin(),profBX.GetXaxis().GetXmax())
+profBXnorm.SetTitle("profBXnorm")
+profBXnorm.GetXaxis().SetTitle("bx")
+profBXnorm.GetYaxis().SetTitle("mean charge/path")
+
+#slope from fit
+p = plot2D["TIB_L1"].ProfileX()
+fitres = p.Fit("pol1","S")
+slope = fitres.Get().GetParams()[1]
+bxQlist = []
+for i in range(profBXnorm.GetNbinsX())[2:]:
+  #print i, meanPU, bxlumi[i], slope
+  #print profBX.GetBinContent(i),profBX.GetBinContent(i)+meanPU*(bxlumi[i]-1)*slope
+  res = profBX.GetBinContent(i)+meanPU*(bxlumi[i]*kfactorBX-1)*slope
+  profBXnorm.SetBinContent(i,res) #profBX.GetBinContent(i)+meanPU*bxlumi[i]*slope)
+  #print profBXnorm.GetBinContent(i), ' et ',res
+  #bxQlist.append(((bxlumi[i]*kfactorBX-1)*meanPU,res))
+  bxQlist.append((bxlumi[i],res))
+profBXnorm.Draw()
+cProfBXNorm.Write()
+cProfBXNorm.Draw(ofilenamebase+"cProfBXnorm.png")
+gbxQCorr = TGraph(len(bxQlist))
+gbxQCorr.SetName('gbxQCorr')
+count = 1
+for i in bxQlist:
+  gbxQCorr.SetPoint(count,i[0],i[1])
+  count+=1
+  #print i[0], i[1]
+#produce graph to check the correlation
+cbxQCorr = TCanvas("cbxQCorr")
+gbxQCorr.GetXaxis().SetTitle('lumi kfactor')
+gbxQCorr.GetYaxis().SetTitle('mean charge/path')
+gbxQCorr.GetXaxis().SetRangeUser(0.9,2)
+gbxQCorr.GetYaxis().SetRangeUser(380,390)
+gbxQCorr.SetMarkerStyle(21)
+gbxQCorr.Draw("AP")
+cbxQCorr.Write()
+cbxQCorr.Print(ofilenamebase+"cbxQCorr.png")
+
+#produce graph splitting first ... last bx in train to check the correlation
+p = plot2D["TIB_L1"].ProfileX()
+bxQlist_1 = []
+bxQlist_2 = []
+bxQlist_3 = []
+bxQlist_4 = []
+bxQlist_5 = []
+bxQlist_10 = []
+bxQlist_20 = []
+bxQlist_30 = []
+bxQlist_40 = []
+for i in range(profBXnorm.GetNbinsX())[2:]:
+  #print i, meanPU, bxlumi[i], slope
+  #print profBX.GetBinContent(i),profBX.GetBinContent(i)+meanPU*(bxlumi[i]-1)*slope
+  #bxQlist.append((bxlumi[i],res))
+  if i in [v[0] for v in train_1] and bxlumi[i]>0.2: bxQlist_1.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_2]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_2.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_3]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_3.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_4]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_4.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_5]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_5.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_10]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_10.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_20]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_20.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_30]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_30.append((bxlumi[i],profBX.GetBinContent(i+1)))
+  if i in [v[0] for v in train_40]and bxlumi[i]>0.2 and profBX.GetBinContent(i)>300 : bxQlist_40.append((bxlumi[i],profBX.GetBinContent(i+1)))
+gbxQ_train1 = TGraph(len(bxQlist_1))
+gbxQ_train1.SetName('gbxQ_train1')
+gbxQ_train2 = TGraph(len(bxQlist_2))
+gbxQ_train2.SetName('gbxQ_train2')
+gbxQ_train3 = TGraph(len(bxQlist_3))
+gbxQ_train3.SetName('gbxQ_train3')
+gbxQ_train4 = TGraph(len(bxQlist_4))
+gbxQ_train4.SetName('gbxQ_train4')
+gbxQ_train5 = TGraph(len(bxQlist_5))
+gbxQ_train5.SetName('gbxQ_train5')
+gbxQ_train10 = TGraph(len(bxQlist_10))
+gbxQ_train10.SetName('gbxQ_train10')
+gbxQ_train20 = TGraph(len(bxQlist_20))
+gbxQ_train20.SetName('gbxQ_train20')
+gbxQ_train30 = TGraph(len(bxQlist_30))
+gbxQ_train30.SetName('gbxQ_train30')
+gbxQ_train40 = TGraph(len(bxQlist_40))
+gbxQ_train40.SetName('gbxQ_train40')
+#print len(bxQlist_1), len(bxQlist_2), len(bxQlist_3),len(bxQlist_4),len(bxQlist_5)
+for count, i in enumerate(bxQlist_1):   gbxQ_train1.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_2):   gbxQ_train2.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_3):   gbxQ_train3.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_4):   gbxQ_train4.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_5):   gbxQ_train5.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_10):   gbxQ_train10.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_20):   gbxQ_train20.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_30):   gbxQ_train30.SetPoint(count,i[0],i[1])
+for count, i in enumerate(bxQlist_40):   gbxQ_train40.SetPoint(count,i[0],i[1])
+
+legtrain40 = TLegend(0.15,0.55,0.4,0.85)
+legtrain1 = TLegend(0.15,0.55,0.4,0.85)
+#produce graph to check the correlation
+cbxQ_train40 = TCanvas("cbxQ_train40")
+gbxQ_train10.GetXaxis().SetTitle('lumi kfactor')
+gbxQ_train10.GetYaxis().SetTitle('mean charge/path')
+gbxQ_train10.GetXaxis().SetRangeUser(0.9,2)
+gbxQ_train10.GetYaxis().SetRangeUser(380,390)
+gbxQ_train10.SetMarkerStyle(21)
+gbxQ_train10.SetMarkerColor(2)
+gbxQ_train20.SetMarkerStyle(22)
+gbxQ_train20.SetMarkerColor(3)
+gbxQ_train30.SetMarkerStyle(23)
+gbxQ_train30.SetMarkerColor(4)
+gbxQ_train40.SetMarkerStyle(8)
+gbxQ_train40.SetMarkerColor(6)
+gbxQ_train10.Draw("AP")
+gbxQ_train10.Fit("pol1")
+gbxQ_train10.GetFunction("pol1").SetLineColor(2)
+gbxQ_train20.Draw("Psame")
+gbxQ_train20.Fit("pol1")
+gbxQ_train20.GetFunction("pol1").SetLineColor(3)
+gbxQ_train30.Draw("Psame")
+gbxQ_train30.Fit("pol1")
+gbxQ_train30.GetFunction("pol1").SetLineColor(4)
+gbxQ_train40.Draw("Psame")
+gbxQ_train40.Fit("pol1")
+gbxQ_train40.GetFunction("pol1").SetLineColor(6)
+legtrain40.AddEntry(gbxQ_train10,"bx [1-10]","P")
+legtrain40.AddEntry(gbxQ_train20,"bx [11-20]","P")
+legtrain40.AddEntry(gbxQ_train30,"bx [21-30]","P")
+legtrain40.AddEntry(gbxQ_train40,"bx [31-40]","P")
+legtrain40.Draw("same")
+cbxQ_train40.Write()
+cbxQ_train40.Print(ofilenamebase+"BxLumi_10203040.png");
+#produce graph to check the correlation
+cbxQ_train1 = TCanvas("cbxQ_train1")
+gbxQ_train1.GetXaxis().SetTitle('lumi kfactor')
+gbxQ_train1.GetYaxis().SetTitle('mean charge/path')
+gbxQ_train1.GetXaxis().SetRangeUser(0.9,2)
+gbxQ_train1.GetYaxis().SetRangeUser(380,390)
+gbxQ_train1.SetMarkerStyle(21)
+gbxQ_train1.SetMarkerColor(2)
+gbxQ_train2.SetMarkerStyle(22)
+gbxQ_train2.SetMarkerColor(3)
+gbxQ_train3.SetMarkerStyle(23)
+gbxQ_train3.SetMarkerColor(4)
+gbxQ_train4.SetMarkerStyle(24)
+gbxQ_train4.SetMarkerColor(7)
+gbxQ_train5.SetMarkerStyle(25)
+gbxQ_train5.SetMarkerColor(6)
+gbxQ_train1.Draw("AP")
+gbxQ_train1.Fit("pol1","","",1,2)
+gbxQ_train1.GetFunction("pol1").SetLineColor(2)
+gbxQ_train2.Draw("Psame")
+gbxQ_train2.Fit("pol1","","",1,2)
+gbxQ_train2.GetFunction("pol1").SetLineColor(3)
+gbxQ_train3.Draw("Psame")
+gbxQ_train3.Fit("pol1","","",1,2)
+gbxQ_train3.GetFunction("pol1").SetLineColor(4)
+gbxQ_train4.Draw("Psame")
+gbxQ_train4.Fit("pol1","","",1,2)
+gbxQ_train4.GetFunction("pol1").SetLineColor(7)
+gbxQ_train5.Draw("Psame")
+gbxQ_train5.Fit("pol1","","",1,2)
+gbxQ_train5.GetFunction("pol1").SetLineColor(6)
+legtrain1.AddEntry(gbxQ_train1,"bx 1","P")
+legtrain1.AddEntry(gbxQ_train2,"bx 2","P")
+legtrain1.AddEntry(gbxQ_train3,"bx 3","P")
+legtrain1.AddEntry(gbxQ_train4,"bx 4","P")
+legtrain1.AddEntry(gbxQ_train5,"bx 5","P")
+legtrain1.Draw("same")
+cbxQ_train1.Write()
+cbxQ_train1.Print(ofilenamebase+"BxLumi_12345.png");
+
+
+#sys.exit(-1)
 
 
 ## Overlay the layers
@@ -170,7 +424,7 @@ cLandauRange_rms = TCanvas("landauRange_rms")
 rebinning = {'':'1','G2':'2','G3':'3','G4':'4','G5':'5'}
 legRange = TLegend(0.6,0.15,0.8,0.5)
 indice = 1
-ranges = [0.5,1,1.5,2,3,5-1]
+ranges = [0.5,1,1.5,2,3,5,-1]
 for r in ranges:
   title = "#pm "+str(r)+"#sigma"
   if r == -1:
