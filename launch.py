@@ -122,7 +122,9 @@ for tree in tree_list:
    os.chdir(launchdir)
    #launch the job
    #command = ["bsub","-q","8nm",filename]
-   mailoption = "-o /dev/null -e /dev/null"
+   #mailoption = "-o /dev/null -e /dev/null"
+   mailoption = ""
+   #command = ["LSB_JOB_REPORT_MAIL=N","bsub","-q",options.queue,mailoption,filename]
    command = ["bsub","-q",options.queue,mailoption,filename]
    print command
    #subprocess.call(command)
